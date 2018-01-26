@@ -2,3 +2,4 @@ proxy
 kata-proxy
 test/server
 test/client
+*.swp
