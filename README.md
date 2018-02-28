@@ -1,4 +1,9 @@
-[![Build Status](https://travis-ci.org/kata-containers/proxy.svg?branch=master)](https://travis-ci.org/kata-containers/proxy)
-[![codecov](https://codecov.io/gh/kata-containers/proxy/branch/master/graph/badge.svg)](https://codecov.io/gh/kata-containers/proxy)
-
-# Kata Containers Proxy
+```
+ooo        ooooo                     .o.
+`88.       .888'                     888
+ 888b     d'888   .ooooo.   .ooooo.  888
+ 8 Y88. .P  888  d88' `88b d88' `88b Y8P
+ 8  `888'   888  888   888 888   888 `8'
+ 8    Y     888  888   888 888   888 .o.
+o8o        o888o `Y8bod8P' `Y8bod8P' Y8P
+```
