@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -229,6 +230,11 @@ func handleSignal(sigCh chan os.Signal, vmConn *net.Conn, proxyListener *net.Lis
 	}
 
 	return nil
+}
+
+func init() {
+	// Force coredump + full stacktrace on internal error
+	debug.SetTraceback("crash")
 }
 
 func main() {
