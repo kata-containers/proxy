@@ -204,13 +204,13 @@ func TestProxy(t *testing.T) {
 	}
 	defer func() {
 		close(closeCh)
-		lp.Close()
 		s.Close()
 	}()
 
 	// run client tests
 	files, err := ioutil.ReadDir(testDir)
 	if err != nil {
+		lp.Close()
 		t.Fatal(err)
 	}
 
@@ -232,11 +232,16 @@ func TestProxy(t *testing.T) {
 		close(cliRes)
 	}()
 
-	for err := range cliRes {
+	for err = range cliRes {
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
+
+	// closing the listener should result in an error in results channel
+	lp.Close()
+	err = <-results
+	assert.NotNil(t, err, "closing listener should result in an error")
 }
 
 func TestSetupSigtermNotifier(t *testing.T) {
