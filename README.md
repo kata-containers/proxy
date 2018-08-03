@@ -2,3 +2,4 @@
 [![codecov](https://codecov.io/gh/kata-containers/proxy/branch/master/graph/badge.svg)](https://codecov.io/gh/kata-containers/proxy)
 
 # Kata Containers Proxy
+One day we must add a touch more text here....
