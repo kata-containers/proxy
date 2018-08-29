@@ -42,24 +42,51 @@ var crashOnError = false
 
 var proxyLog = logrus.New()
 
-func serve(servConn io.ReadWriteCloser, proto, addr string, results chan error) (net.Listener, error) {
+// yamuxWriter is a type responsible for logging yamux messages to the proxy
+// log.
+type yamuxWriter struct {
+}
+
+// Write implements the Writer interface for the yamuxWriter.
+func (yw yamuxWriter) Write(bytes []byte) (int, error) {
+	message := string(bytes)
+
+	l := len(message)
+
+	// yamux messages are all warnings and errors
+	logger().WithField("component", "yamux").Warn(message)
+
+	return l, nil
+}
+
+func serve(servConn io.ReadWriteCloser, proto, addr string, results chan error) (net.Listener, *yamux.Session, error) {
 	sessionConfig := yamux.DefaultConfig()
 	// Disable keepAlive since we don't know how much time a container can be paused
 	sessionConfig.EnableKeepAlive = false
+
+	sessionConfig.LogOutput = yamuxWriter{}
+
 	session, err := yamux.Client(servConn, sessionConfig)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// serving connection
 	l, err := net.Listen(proto, addr)
 	if err != nil {
-		return nil, err
+		session.Close()
+		return nil, nil, err
 	}
 
 	go func() {
 		var err error
+
+		wg := &sync.WaitGroup{}
 		defer func() {
+			// close session before waiting to make sure all streams are closed,
+			// so that the copy goroutines can quit.
+			session.Close()
+			wg.Wait()
 			l.Close()
 			results <- err
 		}()
@@ -76,14 +103,16 @@ func serve(servConn io.ReadWriteCloser, proto, addr string, results chan error) 
 				return
 			}
 
-			go proxyConn(conn, stream)
+			// add 2 for the two copy goroutines
+			wg.Add(2)
+			go proxyConn(conn, stream, wg)
 		}
 	}()
 
-	return l, nil
+	return l, session, nil
 }
 
-func proxyConn(conn1 net.Conn, conn2 net.Conn) {
+func proxyConn(conn1 net.Conn, conn2 net.Conn, wg *sync.WaitGroup) {
 	once := &sync.Once{}
 	cleanup := func() {
 		conn1.Close()
@@ -92,10 +121,11 @@ func proxyConn(conn1 net.Conn, conn2 net.Conn) {
 	copyStream := func(dst io.Writer, src io.Reader) {
 		_, err := io.Copy(dst, src)
 		if err != nil {
-			logger().Debug("Copy stream error: %v", err)
+			logger().WithError(err).Debug("Copy stream error")
 		}
 
 		once.Do(cleanup)
+		wg.Done()
 	}
 
 	go copyStream(conn1, conn2)
@@ -125,7 +155,7 @@ func logger() *logrus.Entry {
 	})
 }
 
-func setupLogger(logLevel string) error {
+func setupLogger(logLevel string, announceFields logrus.Fields) error {
 	level, err := logrus.ParseLevel(logLevel)
 	if err != nil {
 		return err
@@ -136,11 +166,13 @@ func setupLogger(logLevel string) error {
 	proxyLog.Formatter = &logrus.TextFormatter{TimestampFormat: time.RFC3339Nano}
 
 	hook, err := lSyslog.NewSyslogHook("", "", syslog.LOG_INFO|syslog.LOG_USER, proxyName)
-	if err == nil {
-		proxyLog.AddHook(hook)
+	if err != nil {
+		return err
 	}
 
-	logger().WithField("version", version).Info()
+	proxyLog.AddHook(hook)
+
+	logger().WithFields(announceFields).WithField("log-level", logLevel).Info("announce")
 
 	return nil
 }
@@ -154,7 +186,7 @@ func printAgentLogs(sock string) error {
 
 	agentLogsAddr, err := unixAddr(sock)
 	if err != nil {
-		logger().WithField("socket-address", sock).Fatal("invalid agent logs socket address")
+		logger().WithField("socket-address", sock).WithError(err).Fatal("invalid agent logs socket address")
 		return err
 	}
 
@@ -188,7 +220,7 @@ func printAgentLogs(sock string) error {
 		}
 
 		if err := scanner.Err(); err != nil {
-			logger().Errorf("Failed reading agent logs from socket: %v", err)
+			logger().WithError(err).Error("Failed reading agent logs from socket")
 		}
 	}()
 
@@ -310,30 +342,40 @@ func realMain() {
 
 	sigCh := setupNotifier()
 
-	if err := setupLogger(logLevel); err != nil {
-		logger().Fatal(err)
+	announceFields := logrus.Fields{
+		"agent-logs-socket":   agentLogsSocket,
+		"channel-mux-socket":  channel,
+		"debug":               debug,
+		"proxy-listen-socket": proxyAddr,
+		"version":             version,
+	}
+
+	if err := setupLogger(logLevel, announceFields); err != nil {
+		logger().WithError(err).Fatal("unable to setup logger")
+		os.Exit(1)
 	}
 
 	if err := printAgentLogs(agentLogsSocket); err != nil {
-		logger().Fatal(err)
-		return
+		logger().WithError(err).Fatal("failed to print agent logs")
+		os.Exit(1)
 	}
 
 	muxAddr, err := unixAddr(channel)
 	if err != nil {
 		logger().WithError(err).Fatal("invalid mux socket address")
+		os.Exit(1)
 	}
 	listenAddr, err := unixAddr(proxyAddr)
 	if err != nil {
-		logger().Fatal("invalid listen socket address")
-		return
+		logger().WithError(err).Fatal("invalid listen socket address")
+		os.Exit(1)
 	}
 
 	// yamux connection
 	servConn, err := net.Dial("unix", muxAddr)
 	if err != nil {
-		logger().Fatalf("failed to dial channel(%q): %s", muxAddr, err)
-		return
+		logger().WithError(err).WithField("channel", muxAddr).Fatal("failed to dial channel")
+		os.Exit(1)
 	}
 	defer func() {
 		if servConn != nil {
@@ -342,12 +384,13 @@ func realMain() {
 	}()
 
 	results := make(chan error)
-	l, err := serve(servConn, "unix", listenAddr, results)
+	l, s, err := serve(servConn, "unix", listenAddr, results)
 	if err != nil {
-		logger().Fatal(err)
-		return
+		logger().WithError(err).Fatal("failed to serve")
+		os.Exit(1)
 	}
 	defer func() {
+		s.Close()
 		if l != nil {
 			l.Close()
 		}
@@ -356,14 +399,14 @@ func realMain() {
 	go func() {
 		for err := range results {
 			if err != nil {
-				logger().Fatal(err)
+				logger().WithError(err).Fatal("channel error")
 			}
 		}
 	}()
 
 	if err := handleExitSignal(sigCh, &servConn, &l); err != nil {
-		logger().Fatal(err)
-		return
+		logger().WithError(err).Fatal("failed to handle exit signal")
+		os.Exit(1)
 	}
 
 	logger().Debug("shutting down")
