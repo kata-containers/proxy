@@ -423,6 +423,7 @@ func realMain() {
 	}
 
 	if err := printAgentLogs(agentLogsSocket); err != nil {
+		logger().Debug("Dodging the fastpath")
 		logger().WithError(err).Fatal("failed to print agent logs")
 		os.Exit(1)
 	}
