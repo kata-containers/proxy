@@ -1,0 +1,42 @@
+on: ["pull_request"]
+name: Proxy repository
+jobs:
+  test:
+    strategy:
+      matrix:
+        go-version: [1.13.x, 1.14.x, 1.15.x]
+        os: [ubuntu-16.04]
+    runs-on: ${{ matrix.os }}
+    env:
+      GO111MODULE: off
+    steps:
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Setup GOPATH
+      run: |
+        gopath_org=$(go env GOPATH)/src/github.com/kata-containers/
+        mkdir -p ${gopath_org}
+        ln -s ${PWD} ${gopath_org}
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Install package dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq automake moreutils
+    - name: Building
+      run: |
+        proxy_repo=$(go env GOPATH)/src/github.com/kata-containers/proxy
+        pushd ${proxy_repo}
+        GOPATH=$(go env GOPATH) make
+    - name: Running tests
+      run: |
+        proxy_repo=$(go env GOPATH)/src/github.com/kata-containers/proxy
+        pushd ${proxy_repo}
+        GOPATH=$(go env GOPATH) make test 
+    - name: Running static checks
+      run: |
+        proxy_repo=$(go env GOPATH)/src/github.com/kata-containers/proxy
+        pushd ${proxy_repo}
+        GOPATH=$(go env GOPATH) .ci/static-checks.sh
