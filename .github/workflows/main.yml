@@ -9,6 +9,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       GO111MODULE: off
+      TRAVIS: "true"
+      TRAVIS_BRANCH: ${{ github.base_ref }}
+      TRAVIS_PULL_REQUEST_BRANCH: ${{ github.head_ref }}
+      TRAVIS_PULL_REQUEST_SHA : ${{ github.event.pull_request.head.sha }}
     steps:
     - name: Install Go
       uses: actions/setup-go@v2
@@ -19,8 +23,15 @@ jobs:
         gopath_org=$(go env GOPATH)/src/github.com/kata-containers/
         mkdir -p ${gopath_org}
         ln -s ${PWD} ${gopath_org}
+        echo "TRAVIS_BRANCH: ${TRAVIS_BRANCH}"
+        echo "TRAVIS_PULL_REQUEST_BRANCH: ${TRAVIS_PULL_REQUEST_BRANCH}"
+        echo "TRAVIS_PULL_REQUEST_SHA: ${TRAVIS_PULL_REQUEST_SHA}"
+        echo "TRAVIS: ${TRAVIS}"
     - name: Checkout code
       uses: actions/checkout@v2
+    - name: Setup travis references
+      run: |
+        echo "TRAVIS_BRANCH=${TRAVIS_BRANCH:-$(echo $GITHUB_REF | awk 'BEGIN { FS = \"/\" } ; { print $3 }')}" 
     - name: Install package dependencies
       run: |
         sudo apt-get update -qq
