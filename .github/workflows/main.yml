@@ -1,11 +1,11 @@
 on: ["pull_request"]
-name: Proxy repository
+name: Static checks
 jobs:
   test:
     strategy:
       matrix:
         go-version: [1.13.x, 1.14.x, 1.15.x]
-        os: [ubuntu-16.04]
+        os: [ubuntu-18.04]
     runs-on: ${{ matrix.os }}
     env:
       GO111MODULE: off
@@ -29,6 +29,8 @@ jobs:
         echo "TRAVIS: ${TRAVIS}"
     - name: Checkout code
       uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
     - name: Setup travis references
       run: |
         echo "TRAVIS_BRANCH=${TRAVIS_BRANCH:-$(echo $GITHUB_REF | awk 'BEGIN { FS = \"/\" } ; { print $3 }')}" 
